@@ -1,0 +1,25 @@
+services:
+  web:
+    build: .
+    container_name: site-financeiro-web
+    command: >
+      gunicorn -w 3 -k gthread --threads 8 --timeout 120
+      --bind 0.0.0.0:${FLASK_PORT:-5001} app:app
+    env_file:
+      - .env
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "false"
+      FLASK_HOST: 0.0.0.0
+      FLASK_PORT: "5001"
+    networks:
+      - n8n_net
+    restart: unless-stopped
+    volumes:
+      - ./templates:/app/templates:ro
+      - ./static:/app/static:ro
+
+networks:
+  n8n_net:
+    external: true
+    name: n8n-docker-caddy_n8n_net
