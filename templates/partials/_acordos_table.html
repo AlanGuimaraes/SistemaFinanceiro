@@ -11,7 +11,7 @@
     padding:14px 16px;
     border-bottom:1px solid #e5e7eb;
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     justify-content:space-between;
     gap:12px;
     flex-wrap:wrap;
@@ -22,6 +22,7 @@
     display:flex;
     align-items:center;
     gap:10px;
+    flex-wrap:wrap;
   }
   .ac-pill{
     display:none;
@@ -32,7 +33,7 @@
     color:#fff;
     font-weight:700;
   }
-  .ac-actions{ display:flex; align-items:center; gap:10px; }
+  .ac-actions{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .ac-btn{
     padding:8px 12px;
     border-radius:10px;
@@ -50,6 +51,49 @@
     color:#fff;
   }
   .ac-btn-primary:hover{ background:#4338ca; }
+
+  /* ====== NOVO: Barra de totais (responde aos filtros) ====== */
+  .ac-totals{
+    width:100%;
+    display:grid;
+    grid-template-columns: repeat(6, minmax(160px, 1fr));
+    gap:10px;
+    padding:12px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#fafafa;
+  }
+  .ac-total-box{
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    padding:10px 12px;
+    min-width: 160px;
+  }
+  .ac-total-label{
+    font-size:11px;
+    font-weight:950;
+    letter-spacing:.08em;
+    color:#6b7280;
+    text-transform:uppercase;
+  }
+  .ac-total-value{
+    margin-top:6px;
+    font-size:16px;
+    font-weight:950;
+    color:#111827;
+    white-space:nowrap;
+  }
+  .ac-total-sub{
+    margin-top:4px;
+    font-size:12px;
+    color:#6b7280;
+  }
+  @media (max-width: 1200px){
+    .ac-totals{ grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+  }
+  @media (max-width: 740px){
+    .ac-totals{ grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+  }
 
   /* WRAP com altura fixa (~50 linhas) */
   .ac-table-wrap{
@@ -373,38 +417,22 @@
   body{ padding-bottom: 18px; }
 
   /* ===================== REGRAS DE COR (CLASSES) ===================== */
-  .ac-row-cnpj{
-    background:#ff00ff !important;
-  }
-  .ac-row-arepassar{
-    background:#ffff00 !important;
-  }
-  .ac-row-repassado{
-    background:#c27ba0 !important;
-  }
-  .ac-row-iddeposito{
-    background:#00b050 !important;
-  }
-  .ac-row-aguardando-pix{
-    background:#0070c0 !important;
-  }
-  .ac-row-aguardando-retorno{
-    background:#a2c4c9 !important;
-  }
+  .ac-row-cnpj{ background:#ff00ff !important; }
+  .ac-row-arepassar{ background:#ffff00 !important; }
+  .ac-row-repassado{ background:#c27ba0 !important; }
+  .ac-row-iddeposito{ background:#00b050 !important; }
+  .ac-row-aguardando-pix{ background:#0070c0 !important; }
+  .ac-row-aguardando-retorno{ background:#a2c4c9 !important; }
 
   /* melhora legibilidade no azul forte */
-  .ac-row-aguardando-pix td{
-    color:#ffffff !important;
-  }
+  .ac-row-aguardando-pix td{ color:#ffffff !important; }
 
   /* garante que botões fiquem legíveis em fundos fortes */
   .ac-colored .ac-btn{
     background: rgba(255,255,255,0.88);
     border-color: rgba(17,24,39,0.15);
   }
-  .ac-colored .ac-btn:hover{
-    background: rgba(255,255,255,0.96);
-  }
+  .ac-colored .ac-btn:hover{ background: rgba(255,255,255,0.96); }
 </style>
 
 <div class="ac-card">
@@ -417,6 +445,40 @@
     <div class="ac-actions">
       <button type="button" class="ac-btn" onclick="AC.clearAll()">Limpar todos os filtros</button>
       <button type="button" class="ac-btn ac-btn-primary" onclick="openCreateModal()">Novo acordo</button>
+    </div>
+  </div>
+
+  <!-- ===== NOVO: Totais dinâmicos (mudam conforme filtros) ===== -->
+  <div class="ac-totals" id="acTotalsBar" aria-live="polite">
+    <div class="ac-total-box">
+      <div class="ac-total-label">Valor acordo</div>
+      <div class="ac-total-value" id="acSumValorAcordo">R$ 0,00</div>
+      <div class="ac-total-sub">Somatório dos visíveis</div>
+    </div>
+    <div class="ac-total-box">
+      <div class="ac-total-label">Honorários</div>
+      <div class="ac-total-value" id="acSumHonorarios">R$ 0,00</div>
+      <div class="ac-total-sub">Somatório dos visíveis</div>
+    </div>
+    <div class="ac-total-box">
+      <div class="ac-total-label">Audiencista</div>
+      <div class="ac-total-value" id="acSumAudiencista">R$ 0,00</div>
+      <div class="ac-total-sub">Somatório dos visíveis</div>
+    </div>
+    <div class="ac-total-box">
+      <div class="ac-total-label">Repasse</div>
+      <div class="ac-total-value" id="acSumRepasse">R$ 0,00</div>
+      <div class="ac-total-sub">Somatório dos visíveis</div>
+    </div>
+    <div class="ac-total-box">
+      <div class="ac-total-label">Sucumbência</div>
+      <div class="ac-total-value" id="acSumSucumbencia">R$ 0,00</div>
+      <div class="ac-total-sub">Somatório dos visíveis</div>
+    </div>
+    <div class="ac-total-box">
+      <div class="ac-total-label">Total geral</div>
+      <div class="ac-total-value" id="acSumTotalGeral">R$ 0,00</div>
+      <div class="ac-total-sub">Soma dos 5 campos</div>
     </div>
   </div>
 
@@ -692,7 +754,6 @@ async function deleteAcordo(id){
   function applyRule(tr){
     clearColorClasses(tr);
 
-    // pega do dataset (mais confiável) e também do texto como fallback
     let rowObj = {};
     try{
       rowObj = JSON.parse(tr.dataset.row || "{}");
@@ -702,7 +763,6 @@ async function deleteAcordo(id){
     const status = norm(rowObj.status ?? tr.cells[8]?.innerText);
     const local  = norm(rowObj.local  ?? tr.cells[12]?.innerText);
 
-    // ===== HIERARQUIA (A PRIMEIRA QUE BATER, PREVALECE) =====
     if (tipo === "CNPJ"){
       tr.classList.add("ac-colored", "ac-row-cnpj");
       return;
@@ -733,24 +793,29 @@ async function deleteAcordo(id){
     tbody.querySelectorAll("tr.ac-row").forEach(tr => applyRule(tr));
   }
 
-  // inicial
   applyAll();
-
-  // se você recarregar via AJAX no futuro, dá pra chamar: window.AC_COLORS.refresh()
   window.AC_COLORS = { refresh: applyAll };
-
-  // quando o modal salvar e você atualizar a linha localmente (se fizer), pode chamar refresh().
 })();
 </script>
 
 <script>
-/* ===================== TABELA + FILTROS + DATAS BR ===================== */
+/* ===================== TABELA + FILTROS + DATAS BR + TOTAIS DINÂMICOS ===================== */
 (function(){
   const table = document.getElementById('acTable');
   const thead = table?.tHead?.rows?.[0];
   const tbody = document.getElementById('acTbody');
   const badge = document.getElementById('acFilteredBadge');
   const countEl = document.getElementById('acRowsCount');
+
+  // ===== Totais (IDs)
+  const sumEls = {
+    valor_acordo: document.getElementById("acSumValorAcordo"),
+    honorarios: document.getElementById("acSumHonorarios"),
+    audiencista: document.getElementById("acSumAudiencista"),
+    repasse: document.getElementById("acSumRepasse"),
+    sucumbencia: document.getElementById("acSumSucumbencia"),
+    total: document.getElementById("acSumTotalGeral"),
+  };
 
   if (!thead || !tbody) return;
 
@@ -858,6 +923,101 @@ async function deleteAcordo(id){
     return allRows.filter(r => matchesFilters(r));
   }
 
+  // ======= NOVO: parse num BR / dataset + render moeda =======
+  function numFromAny(v){
+    if (v === null || v === undefined) return 0;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+
+    const s0 = String(v).trim();
+    if (!s0 || s0 === "-") return 0;
+
+    // remove moeda e espaços
+    let s = s0.replace(/\s/g, "").replace(/R\$/gi, "");
+
+    // mantém só dígitos/sinais/separadores
+    s = s.replace(/[^0-9.,-]/g, "");
+    if (!s || s === "-" || s === "," || s === ".") return 0;
+
+    // se tem "," e ".", assume separador decimal é o último
+    if (s.includes(",") && s.includes(".")){
+      if (s.lastIndexOf(",") > s.lastIndexOf(".")){
+        // 1.234,56
+        s = s.replace(/\./g, "").replace(",", ".");
+      } else {
+        // 1,234.56
+        s = s.replace(/,/g, "");
+      }
+    } else if (s.includes(",") && !s.includes(".")){
+      // 1234,56
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      // 1234.56 ou 1234
+      // ok
+    }
+
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  const moneyFmt = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    maximumFractionDigits: 2
+  });
+
+  function money(n){ return moneyFmt.format(Number(n || 0)); }
+
+  // índices das colunas numéricas na tabela (fixo pelo seu <thead>)
+  const COL_IDX = {
+    valor_acordo: 7,
+    honorarios: 14,
+    audiencista: 15,
+    repasse: 16,
+    sucumbencia: 18
+  };
+
+  function readRowObj(tr){
+    try{ return JSON.parse(tr.dataset.row || "{}"); }
+    catch(_){ return {}; }
+  }
+
+  function computeTotalsFromVisibleRows(visibleRows){
+    let sValor = 0, sHon = 0, sAud = 0, sRep = 0, sSuc = 0;
+
+    for (const tr of visibleRows){
+      // preferir dataset.row (mais confiável), fallback no texto da célula
+      const obj = readRowObj(tr);
+
+      const vValor = (obj.valor_acordo ?? textOfCell(tr, COL_IDX.valor_acordo));
+      const vHon   = (obj.honorarios ?? textOfCell(tr, COL_IDX.honorarios));
+      const vAud   = (obj.audiencista ?? textOfCell(tr, COL_IDX.audiencista));
+      const vRep   = (obj.repasse ?? textOfCell(tr, COL_IDX.repasse));
+      const vSuc   = (obj.sucumbencia ?? textOfCell(tr, COL_IDX.sucumbencia));
+
+      sValor += numFromAny(vValor);
+      sHon   += numFromAny(vHon);
+      sAud   += numFromAny(vAud);
+      sRep   += numFromAny(vRep);
+      sSuc   += numFromAny(vSuc);
+    }
+
+    const total = sValor + sHon + sAud + sRep + sSuc;
+
+    return { sValor, sHon, sAud, sRep, sSuc, total };
+  }
+
+  function renderTotals(){
+    const vis = getVisibleRows();
+    const t = computeTotalsFromVisibleRows(vis);
+
+    if (sumEls.valor_acordo) sumEls.valor_acordo.textContent = money(t.sValor);
+    if (sumEls.honorarios) sumEls.honorarios.textContent = money(t.sHon);
+    if (sumEls.audiencista) sumEls.audiencista.textContent = money(t.sAud);
+    if (sumEls.repasse) sumEls.repasse.textContent = money(t.sRep);
+    if (sumEls.sucumbencia) sumEls.sucumbencia.textContent = money(t.sSuc);
+    if (sumEls.total) sumEls.total.textContent = money(t.total);
+  }
+
   function apply(){
     allRows.forEach(r => r.style.display = matchesFilters(r) ? '' : 'none');
 
@@ -907,7 +1067,10 @@ async function deleteAcordo(id){
     });
 
     window.AC_XSCROLL?.refresh?.();
-    window.AC_COLORS?.refresh?.(); // garante cores após sort/reorder
+    window.AC_COLORS?.refresh?.();
+
+    // ===== NOVO: recalcula totais após aplicar filtros/ordenação
+    renderTotals();
   }
 
   function valuesForColumn(col, forcedDateMode = null){
@@ -1141,7 +1304,7 @@ async function deleteAcordo(id){
   };
 
   buildHeaderUI();
-  apply();
+  apply(); // <-- já calcula totais na primeira renderização
 })();
 </script>
 

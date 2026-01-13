@@ -51,12 +51,77 @@
   }
   .md-btn-primary:hover{ background:#4338ca; }
 
+  /* ======= CARDS DE SOMATÓRIO (MESMO TAMANHO “BOM” DOS ACORDOS) ======= */
+  .md-sums{
+    padding: 14px 16px 0 16px;
+  }
+  .md-sums-grid{
+    display:grid;
+    grid-template-columns: repeat(6, minmax(180px, 1fr));
+    gap:12px;
+    align-items:stretch;
+  }
+  .md-sum-card{
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    background:#fff;
+    padding:14px 14px;
+    min-height: 86px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+  }
+  .md-sum-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .md-sum-label{
+    font-size:11px;
+    font-weight:950;
+    color:#6b7280;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .md-sum-value{
+    font-size:16px;
+    font-weight:950;
+    color:#111827;
+    margin-top:6px;
+  }
+  .md-sum-sub{
+    margin-top:6px;
+    font-size:12px;
+    color:#6b7280;
+  }
+  .md-sum-card.total{
+    border-color:#c7d2fe;
+    background: #eef2ff;
+  }
+  .md-sum-card.total .md-sum-label{ color:#4338ca; }
+  .md-sum-card.total .md-sum-value{ color:#111827; }
+
+  @media (max-width: 1400px){
+    .md-sums-grid{ grid-template-columns: repeat(3, minmax(220px, 1fr)); }
+  }
+  @media (max-width: 900px){
+    .md-sums-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  }
+  @media (max-width: 520px){
+    .md-sums-grid{ grid-template-columns: 1fr; }
+  }
+
   /* WRAP com altura fixa (~50 linhas) */
   .md-table-wrap{
     overflow:auto;
     min-height: 1100px;
     max-height: 1100px;
     position:relative;
+    margin-top: 12px;
   }
 
   table.md-table{ width:100%; border-collapse:separate; border-spacing:0; }
@@ -385,6 +450,47 @@
     </div>
   </div>
 
+  <!-- ======= SOMATÓRIOS (VISÍVEIS / FILTRADOS) ======= -->
+  <div class="md-sums">
+    <div class="md-sums-grid">
+      <div class="md-sum-card">
+        <div class="md-sum-top"><div class="md-sum-label">Quitação</div></div>
+        <div class="md-sum-value" id="mdSumQuitacao">R$ 0,00</div>
+        <div class="md-sum-sub">Somatório dos visíveis</div>
+      </div>
+
+      <div class="md-sum-card">
+        <div class="md-sum-top"><div class="md-sum-label">Depósito</div></div>
+        <div class="md-sum-value" id="mdSumDeposito">R$ 0,00</div>
+        <div class="md-sum-sub">Somatório dos visíveis</div>
+      </div>
+
+      <div class="md-sum-card">
+        <div class="md-sum-top"><div class="md-sum-label">Correção</div></div>
+        <div class="md-sum-value" id="mdSumCorrecao">R$ 0,00</div>
+        <div class="md-sum-sub">Somatório dos visíveis</div>
+      </div>
+
+      <div class="md-sum-card">
+        <div class="md-sum-top"><div class="md-sum-label">Honorários</div></div>
+        <div class="md-sum-value" id="mdSumHonorarios">R$ 0,00</div>
+        <div class="md-sum-sub">Somatório dos visíveis</div>
+      </div>
+
+      <div class="md-sum-card">
+        <div class="md-sum-top"><div class="md-sum-label">Repasse</div></div>
+        <div class="md-sum-value" id="mdSumRepasse">R$ 0,00</div>
+        <div class="md-sum-sub">Somatório dos visíveis</div>
+      </div>
+
+      <div class="md-sum-card total">
+        <div class="md-sum-top"><div class="md-sum-label">Total geral</div></div>
+        <div class="md-sum-value" id="mdSumTotalGeral">R$ 0,00</div>
+        <div class="md-sum-sub">Soma dos campos</div>
+      </div>
+    </div>
+  </div>
+
   <div class="md-table-wrap">
     <table class="md-table" id="mdTable">
       <thead>
@@ -653,7 +759,7 @@ async function deleteMandado(id){
 </script>
 
 <script>
-/* ===================== TABELA + FILTROS + DATAS BR ===================== */
+/* ===================== TABELA + FILTROS + DATAS BR + SOMATÓRIOS ===================== */
 (function(){
   const table = document.getElementById('mdTable');
   const thead = table?.tHead?.rows?.[0];
@@ -663,21 +769,27 @@ async function deleteMandado(id){
 
   if (!thead || !tbody) return;
 
+  // ===== refs somatórios =====
+  const sumEls = {
+    quitacao: document.getElementById("mdSumQuitacao"),
+    deposito: document.getElementById("mdSumDeposito"),
+    correcao: document.getElementById("mdSumCorrecao"),
+    honorarios: document.getElementById("mdSumHonorarios"),
+    repasse: document.getElementById("mdSumRepasse"),
+    total: document.getElementById("mdSumTotalGeral"),
+  };
+
+  // ===== helpers =====
   function toBRDateText(raw){
     if(!raw) return '-';
     raw = String(raw).trim();
     if(raw === '-' || raw === '') return '-';
-
-    // se já estiver dd/mm/aaaa
     if(/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
-
-    // pega ISO YYYY-MM-DD (ou timestamp começando por isso)
     const m1 = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if(m1){
       const yyyy = m1[1], mm = m1[2], dd = m1[3];
       return `${dd}/${mm}/${yyyy}`;
     }
-
     return raw;
   }
 
@@ -690,6 +802,37 @@ async function deleteMandado(id){
     if(br === '-' || !/^\d{2}\/\d{2}\/\d{4}$/.test(br)) return br;
     const [dd, mm, yyyy] = br.split('/');
     return `${mm}/${yyyy}`;
+  }
+
+  function parseNumberBR(raw){
+    if(raw === null || raw === undefined) return 0;
+    let s = String(raw).trim();
+    if(!s || s === '-') return 0;
+
+    // remove R$, espaços, etc.
+    s = s.replace(/\s/g,'').replace(/^R\$/i,'').trim();
+
+    // Se tem vírgula e ponto, assume pt-BR: 1.234,56
+    if(s.includes(',') && s.includes('.')){
+      s = s.replace(/\./g,'').replace(',', '.');
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    // Se só tem vírgula, pode ser decimal pt-BR: 1234,56
+    if(s.includes(',') && !s.includes('.')){
+      const n = parseFloat(s.replace(',', '.'));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    // senão, parse normal (1234.56 ou 1234)
+    const n = parseFloat(s.replace(/[^\d.-]/g,''));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function formatBRL(n){
+    const v = Number.isFinite(n) ? n : 0;
+    return v.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
   }
 
   // aplica formatação BR nos campos marcados como data
@@ -748,12 +891,9 @@ async function deleteMandado(id){
 
   function isDateCol(col){
     const headerText = (thead.cells[col]?.innerText || '').toLowerCase();
-
-    // "data ..." e também "criado/atualizado" (timestamps)
     if (headerText.includes('data')) return true;
     if (headerText.includes('criado')) return true;
     if (headerText.includes('atualizado')) return true;
-
     return false;
   }
 
@@ -776,6 +916,37 @@ async function deleteMandado(id){
 
   function getVisibleRows(){
     return allRows.filter(r => matchesFilters(r));
+  }
+
+  // ===== colunas numéricas (pela ordem do seu THEAD atual) =====
+  // 7 QUITAÇÃO, 13 DEPÓSITO, 14 CORREÇÃO, 15 HONORÁRIOS, 17 REPASSE
+  const COL_QUITACAO   = 7;
+  const COL_DEPOSITO   = 13;
+  const COL_CORRECAO   = 14;
+  const COL_HONORARIOS = 15;
+  const COL_REPASSE    = 17;
+
+  function updateSums(){
+    const vis = getVisibleRows();
+
+    let sQuit = 0, sDep = 0, sCor = 0, sHon = 0, sRep = 0;
+
+    vis.forEach(r=>{
+      sQuit += parseNumberBR(textOfCell(r, COL_QUITACAO));
+      sDep  += parseNumberBR(textOfCell(r, COL_DEPOSITO));
+      sCor  += parseNumberBR(textOfCell(r, COL_CORRECAO));
+      sHon  += parseNumberBR(textOfCell(r, COL_HONORARIOS));
+      sRep  += parseNumberBR(textOfCell(r, COL_REPASSE));
+    });
+
+    const total = sQuit + sDep + sCor + sHon + sRep;
+
+    if(sumEls.quitacao)   sumEls.quitacao.textContent   = formatBRL(sQuit);
+    if(sumEls.deposito)   sumEls.deposito.textContent   = formatBRL(sDep);
+    if(sumEls.correcao)   sumEls.correcao.textContent   = formatBRL(sCor);
+    if(sumEls.honorarios) sumEls.honorarios.textContent = formatBRL(sHon);
+    if(sumEls.repasse)    sumEls.repasse.textContent    = formatBRL(sRep);
+    if(sumEls.total)      sumEls.total.textContent      = formatBRL(total);
   }
 
   function apply(){
@@ -827,6 +998,9 @@ async function deleteMandado(id){
     });
 
     window.MD_XSCROLL?.refresh?.();
+
+    // >>> atualiza cards sempre que filtrar/ordenar
+    updateSums();
   }
 
   function valuesForColumn(col, forcedDateMode = null){
@@ -1060,7 +1234,7 @@ async function deleteMandado(id){
   };
 
   buildHeaderUI();
-  apply();
+  apply(); // já chama updateSums()
 })();
 </script>
 

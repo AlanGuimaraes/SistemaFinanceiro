@@ -1,16 +1,17 @@
 import os
-from dotenv import load_dotenv
+import re
+from decimal import Decimal, InvalidOperation
+from datetime import date, datetime
+from collections import Counter
 
-from flask import Flask, render_template, request, redirect, url_for, jsonify, abort
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, jsonify, abort, send_from_directory
 from flask_login import (
     LoginManager, UserMixin, login_user, login_required,
     logout_user, current_user
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 from supabase import create_client, Client
-
-from datetime import date, datetime
-from collections import Counter
 
 load_dotenv()
 
@@ -32,7 +33,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TABLE_USERS = "fin_users"
 TABLE_ACORDOS = "fin_acordos"
 TABLE_MANDADOS = "fin_mandados"
-
 
 # ===================== AUTH =====================
 
@@ -70,16 +70,14 @@ def _is_hash(stored_password: str) -> bool:
 
 def _password_ok(raw_password: str, stored_password: str) -> bool:
     """
-    Agora o padrão é HASH.
+    Padrão: HASH.
     Compat: se ainda tiver senha em texto simples no banco, valida e depois migra pra hash.
     """
     raw_password = (raw_password or "").strip()
     stored_password = (stored_password or "").strip()
-
     if not raw_password or not stored_password:
         return False
 
-    # hash (novo padrão)
     if _is_hash(stored_password):
         try:
             return check_password_hash(stored_password, raw_password)
@@ -92,26 +90,19 @@ def _password_ok(raw_password: str, stored_password: str) -> bool:
 
 def _hash_password(raw_password: str) -> str:
     raw_password = (raw_password or "").strip()
-    # pbkdf2:sha256 (padrão do werkzeug) — suficiente e simples
     return generate_password_hash(raw_password)
 
 
 def _maybe_migrate_plain_password_to_hash(user_row: dict, raw_password_ok: bool):
-    """
-    Se o usuário ainda está com senha em texto simples, e autenticou com sucesso,
-    migra silenciosamente para hash.
-    """
     if not user_row or not raw_password_ok:
         return
     stored = (user_row.get("senha") or "").strip()
     if not stored or _is_hash(stored):
         return
-
     try:
         new_hash = _hash_password(stored)  # stored == senha em texto simples
         supabase.table(TABLE_USERS).update({"senha": new_hash}).eq("login", user_row["login"]).execute()
     except Exception:
-        # não derruba login por falha de migração
         pass
 
 
@@ -141,9 +132,7 @@ def login_post():
     if not ok:
         return render_template("login.html", error="Usuário ou senha inválidos.")
 
-    # migra se ainda era texto simples
     _maybe_migrate_plain_password_to_hash(user_data, ok)
-
     login_user(User(user_data))
     return redirect(url_for("dashboard"))
 
@@ -153,7 +142,6 @@ def login_post():
 def logout():
     logout_user()
     return redirect(url_for("login"))
-
 
 # ===================== HELPERS =====================
 
@@ -198,18 +186,111 @@ def iso_to_br_date(s: str | None) -> str | None:
     return s
 
 
-def parse_finalizado_int(raw: str):
-    if raw in (None, "", "all"):
+def parse_numeric(v):
+    """
+    Aceita:
+      - None / "" -> None
+      - "1.234,56" -> 1234.56
+      - "1234,56"  -> 1234.56
+      - "1,234.56" -> 1234.56 (também tenta)
+      - números -> float
+    """
+    if v is None:
         return None
+
+    # já numérico
+    if isinstance(v, (int, float, Decimal)):
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    s = str(v).strip()
+    if s == "":
+        return None
+
+    # remove espaços
+    s = s.replace(" ", "")
+
+    # mantém só dígitos, sinais e separadores
+    s = re.sub(r"[^0-9\-,.]", "", s)
+    if s in ("", "-", ",", ".", "-.", "-,"):
+        return None
+
+    # Heurística:
+    # se tem vírgula e ponto, o último separador tende a ser decimal
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            # 1.234,56 -> remove pontos e troca vírgula por ponto
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # 1,234.56 -> remove vírgulas (milhar)
+            s = s.replace(",", "")
+    elif "," in s and "." not in s:
+        # 1234,56 -> decimal vírgula
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # só ponto ou só dígitos -> deixa como está
+        pass
+
     try:
-        return int(raw)
-    except Exception:
+        return float(Decimal(s))
+    except (InvalidOperation, ValueError):
         return None
+
+
+NUMERIC_FIELDS_ACORDOS = {
+    "valor_acordo", "honorarios", "repasse", "sucumbencia"
+}
+NUMERIC_FIELDS_MANDADOS = {
+    "deposito", "correcao", "honorarios", "repasse", "sucumbencia"
+}
+
+
+def clean_payload(payload: dict, numeric_fields: set[str]):
+    """
+    - converte "" -> None
+    - parseia campos numéricos
+    - remove chaves com None (não sobrescreve com null)
+      Obs: se você quiser permitir limpar campo (setar NULL), aí NÃO remova None.
+    """
+    out = {}
+    for k, v in (payload or {}).items():
+        if isinstance(v, str) and v.strip() == "":
+            v = None
+
+        if k in numeric_fields:
+            v = parse_numeric(v)
+
+        if v is None:
+            continue
+        out[k] = v
+    return out
+
+
+# ========= NOVA REGRA: finalizado = 1 somente quando status for "FINALIZADO..." =========
+
+def _status_text_from_payload(data: dict) -> str:
+    """
+    Prioriza SEMPRE o campo 'status' (texto exibido no sistema).
+    Só usa 'status_id' como fallback caso 'status' não venha.
+    (Isso evita marcar finalizado errado quando o front envia um id/código em status_id.)
+    """
+    s = (data.get("status") or "").strip()
+    if s:
+        return s
+    return (data.get("status_id") or "").strip()
 
 
 def _derive_finalizado_from_status(status: str) -> int:
-    s = (status or "").strip().lower()
-    return 1 if "finalizado" in s else 0
+    """
+    Regras:
+      - Se o status começar com 'FINALIZADO' (com ou sem acento/variações), finalizado=1
+      - Caso contrário, finalizado=0
+    """
+    s = (status or "").strip().upper()
+    # cobre: "FINALIZADO", "FINALIZADO (CLIENTE INFORMADO)", "FINALIZADO - ...", etc.
+    return 1 if s.startswith("FINALIZADO") else 0
 
 
 def sb_select(table: str, columns="*", limit=300, order_col=None, desc=True, filters=None):
@@ -272,8 +353,22 @@ def sb_select_or_like(table: str, columns="*", limit=300, order_col=None, desc=T
     res = query.execute()
     return getattr(res, "data", None) or []
 
+# ===================== STATIC FIX (logo case-sensitive) =====================
 
-# ===================== DASHBOARD (SE VOCÊ USA) =====================
+@app.get("/static/images/logo.png")
+def static_logo_lowercase_fix():
+    """
+    Linux diferencia Images vs images.
+    Se o HTML pedir /static/images/logo.png mas o arquivo estiver em static/Images/logo.png, isso corrige.
+    """
+    lower_dir = os.path.join(app.root_path, "static", "images")
+    upper_dir = os.path.join(app.root_path, "static", "Images")
+
+    if os.path.exists(os.path.join(lower_dir, "logo.png")):
+        return send_from_directory(lower_dir, "logo.png")
+    return send_from_directory(upper_dir, "logo.png")
+
+# ===================== DASHBOARD =====================
 
 _PT_MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 
@@ -384,7 +479,6 @@ def dashboard():
     selected_reus = request.args.getlist("reu")
 
     cols = "uf, reu, status, data_pagamento, finalizado"
-
     acordos_all = sb_select(TABLE_ACORDOS, columns=cols, limit=50000)
     mandados_all = sb_select(TABLE_MANDADOS, columns=cols, limit=50000)
 
@@ -441,7 +535,6 @@ def dashboard():
         selected_reus=selected_reus,
     )
 
-
 # ===================== ACORDOS (LIST PAGES) =====================
 
 def acordos_list(finalizado_value: int):
@@ -474,14 +567,15 @@ def acordos_finalizados_page():
 def acordos_redirect_to_ativos():
     return redirect(url_for("acordos_ativos_page"))
 
-
 # ===================== ACORDOS (CRUD) =====================
 
 @app.post("/acordos")
 @login_required
 def acordos_create():
     data = request.get_json(force=True) or {}
-    status_txt = data.get("status_id") or data.get("status") or ""
+
+    # sempre derive finalizado a partir do TEXTO do status
+    status_txt = _status_text_from_payload(data)
 
     payload = {
         "data_acordo": br_to_iso_date(data.get("data_acordo")),
@@ -492,7 +586,7 @@ def acordos_create():
         "tel": data.get("tel"),
         "escritorio_reu": data.get("escritorio_reu"),
         "valor_acordo": data.get("valor_acordo"),
-        "status": data.get("status_id") or data.get("status"),
+        "status": status_txt,  # <--- força salvar o texto
         "prazo_estimado": data.get("prazo_estimado"),
         "prazo_real": br_to_iso_date(data.get("prazo_real")),
         "data_pagamento": br_to_iso_date(data.get("data_pagamento")),
@@ -504,10 +598,11 @@ def acordos_create():
         "chave_pix": data.get("chave_pix"),
         "sucumbencia": data.get("sucumbencia"),
         "observacoes": data.get("observacoes"),
-        "finalizado": _derive_finalizado_from_status(status_txt),
+        "mes_pg": data.get("mes_pg"),
+        "finalizado": _derive_finalizado_from_status(status_txt),  # <--- REGRA NOVA
     }
 
-    payload = {k: v for k, v in payload.items() if v is not None}
+    payload = clean_payload(payload, NUMERIC_FIELDS_ACORDOS)
 
     res = supabase.table(TABLE_ACORDOS).insert(payload).execute()
     if getattr(res, "data", None) is None:
@@ -519,7 +614,8 @@ def acordos_create():
 @login_required
 def acordos_update(acordo_id: int):
     data = request.get_json(force=True) or {}
-    status_txt = data.get("status_id") or data.get("status") or ""
+
+    status_txt = _status_text_from_payload(data)
 
     payload = {
         "data_acordo": br_to_iso_date(data.get("data_acordo")),
@@ -530,7 +626,7 @@ def acordos_update(acordo_id: int):
         "tel": data.get("tel"),
         "escritorio_reu": data.get("escritorio_reu"),
         "valor_acordo": data.get("valor_acordo"),
-        "status": data.get("status_id") or data.get("status"),
+        "status": status_txt,  # <--- força salvar o texto
         "prazo_estimado": data.get("prazo_estimado"),
         "prazo_real": br_to_iso_date(data.get("prazo_real")),
         "data_pagamento": br_to_iso_date(data.get("data_pagamento")),
@@ -542,10 +638,11 @@ def acordos_update(acordo_id: int):
         "chave_pix": data.get("chave_pix"),
         "sucumbencia": data.get("sucumbencia"),
         "observacoes": data.get("observacoes"),
-        "finalizado": _derive_finalizado_from_status(status_txt),
+        "mes_pg": data.get("mes_pg"),
+        "finalizado": _derive_finalizado_from_status(status_txt),  # <--- REGRA NOVA
     }
 
-    payload = {k: v for k, v in payload.items() if v is not None}
+    payload = clean_payload(payload, NUMERIC_FIELDS_ACORDOS)
 
     res = supabase.table(TABLE_ACORDOS).update(payload).eq("id", acordo_id).execute()
     if getattr(res, "data", None) is None:
@@ -560,7 +657,6 @@ def acordos_delete(acordo_id: int):
     if getattr(res, "data", None) is None:
         return jsonify({"ok": False, "error": "Falha ao excluir"}), 400
     return jsonify({"ok": True})
-
 
 # ===================== MANDADOS (LIST PAGES) =====================
 
@@ -594,14 +690,14 @@ def mandados_finalizados_page():
 def mandados_redirect_to_ativos():
     return redirect(url_for("mandados_ativos_page"))
 
-
 # ===================== MANDADOS (CRUD) =====================
 
 @app.post("/mandados")
 @login_required
 def mandados_create():
     data = request.get_json(force=True) or {}
-    status_txt = data.get("status_id") or data.get("status") or ""
+
+    status_txt = _status_text_from_payload(data)
 
     payload = {
         "numero_processo": data.get("numero_processo"),
@@ -613,7 +709,7 @@ def mandados_create():
 
         "sentenca": data.get("sentenca"),
         "quitacao": data.get("quitacao"),
-        "status": data.get("status_id") or data.get("status"),
+        "status": status_txt,  # <--- força salvar o texto
         "previsao": data.get("previsao"),
         "data_pagamento": br_to_iso_date(data.get("data_pagamento")),
         "local": data.get("local"),
@@ -630,10 +726,10 @@ def mandados_create():
         "observacoes": data.get("observacoes"),
         "mes_pg": data.get("mes_pg"),
 
-        "finalizado": _derive_finalizado_from_status(status_txt),
+        "finalizado": _derive_finalizado_from_status(status_txt),  # <--- REGRA NOVA
     }
 
-    payload = {k: v for k, v in payload.items() if v is not None}
+    payload = clean_payload(payload, NUMERIC_FIELDS_MANDADOS)
 
     res = supabase.table(TABLE_MANDADOS).insert(payload).execute()
     if getattr(res, "data", None) is None:
@@ -645,7 +741,8 @@ def mandados_create():
 @login_required
 def mandados_update(mandado_id: int):
     data = request.get_json(force=True) or {}
-    status_txt = data.get("status_id") or data.get("status") or ""
+
+    status_txt = _status_text_from_payload(data)
 
     payload = {
         "numero_processo": data.get("numero_processo"),
@@ -657,7 +754,7 @@ def mandados_update(mandado_id: int):
 
         "sentenca": data.get("sentenca"),
         "quitacao": data.get("quitacao"),
-        "status": data.get("status_id") or data.get("status"),
+        "status": status_txt,  # <--- força salvar o texto
         "previsao": data.get("previsao"),
         "data_pagamento": br_to_iso_date(data.get("data_pagamento")),
         "local": data.get("local"),
@@ -674,10 +771,10 @@ def mandados_update(mandado_id: int):
         "observacoes": data.get("observacoes"),
         "mes_pg": data.get("mes_pg"),
 
-        "finalizado": _derive_finalizado_from_status(status_txt),
+        "finalizado": _derive_finalizado_from_status(status_txt),  # <--- REGRA NOVA
     }
 
-    payload = {k: v for k, v in payload.items() if v is not None}
+    payload = clean_payload(payload, NUMERIC_FIELDS_MANDADOS)
 
     res = supabase.table(TABLE_MANDADOS).update(payload).eq("id", mandado_id).execute()
     if getattr(res, "data", None) is None:
@@ -692,7 +789,6 @@ def mandados_delete(mandado_id: int):
     if getattr(res, "data", None) is None:
         return jsonify({"ok": False, "error": "Falha ao excluir"}), 400
     return jsonify({"ok": True})
-
 
 # ===================== CADASTROS (ADMIN) =====================
 
@@ -730,9 +826,6 @@ CADASTRO_TABLES = {
 
 
 def _cad_value_in_use(table_key: str, value: str) -> bool:
-    """
-    Se o valor existir em Acordos/Mandados nos campos de referência, bloqueia update/delete.
-    """
     cfg = CADASTRO_TABLES.get(table_key) or {}
     refs = cfg.get("refs") or []
     value = (value or "").strip()
@@ -747,7 +840,6 @@ def _cad_value_in_use(table_key: str, value: str) -> bool:
             if getattr(r, "data", None):
                 return True
         except Exception:
-            # se deu erro, melhor não bloquear à toa
             pass
 
     return False
@@ -825,7 +917,6 @@ def cadastros_add(table):
     if not value:
         return redirect(url_for("cadastros", table=table, error="Informe um valor."))
 
-    # duplicado (case-insensitive) — busca por match exato via ilike (sem *), aceitando variação de caixa
     try:
         dup = supabase.table(table).select(value_col).ilike(value_col, value).limit(1).execute()
         if getattr(dup, "data", None):
@@ -856,11 +947,9 @@ def cadastros_update(table):
     if not old_value or not new_value:
         return redirect(url_for("cadastros", table=table, error="Valor inválido."))
 
-    # Se está em uso, pode alterar ativo, mas NÃO pode alterar o texto
     if _cad_value_in_use(table, old_value) and new_value != old_value:
         return redirect(url_for("cadastros", table=table, error="Este valor está em uso. Alteração do texto bloqueada; apenas 'Ativo' pode ser alterado."))
 
-    # evita duplicar texto ao renomear
     if new_value != old_value:
         try:
             dup = supabase.table(table).select(value_col).ilike(value_col, new_value).limit(1).execute()
@@ -896,13 +985,11 @@ def cadastros_delete(table):
     supabase.table(table).delete().eq(value_col, value).execute()
     return redirect(url_for("cadastros", table=table, ok="Registro excluído."))
 
-
 # ===================== CONFIG (TODOS OS USUÁRIOS) =====================
 
 @app.get("/config")
 @login_required
 def config_page():
-    # busca dados atuais para garantir que está atualizado
     u = _get_user_by_login(current_user.login) or {}
     return render_template("config.html", user=u, error=request.args.get("error"), ok=request.args.get("ok"))
 
@@ -910,12 +997,6 @@ def config_page():
 @app.post("/config")
 @login_required
 def config_post():
-    """
-    Permite o usuário mudar:
-    - nome
-    - email
-    - senha (com senha atual obrigatória)
-    """
     nome = (request.form.get("nome") or "").strip()
     email = (request.form.get("email") or "").strip()
 
@@ -933,7 +1014,6 @@ def config_post():
     if email != "":
         payload["email"] = email
 
-    # troca senha (opcional)
     wants_pw_change = any([senha_atual, senha_nova, senha_nova2])
     if wants_pw_change:
         if not (senha_atual and senha_nova and senha_nova2):
@@ -942,12 +1022,9 @@ def config_post():
             return redirect(url_for("config_page", error="A confirmação da nova senha não confere."))
         if len(senha_nova) < 6:
             return redirect(url_for("config_page", error="A nova senha deve ter pelo menos 6 caracteres."))
-
-        # valida senha atual (suporta hash e texto simples legado)
         if not _password_ok(senha_atual, user_row.get("senha", "")):
             return redirect(url_for("config_page", error="Senha atual incorreta."))
 
-        # salva hash
         payload["senha"] = _hash_password(senha_nova)
 
     if not payload:
@@ -960,8 +1037,7 @@ def config_post():
 
     return redirect(url_for("config_page", ok="Dados atualizados com sucesso."))
 
-
-# ===================== USERS ADMIN (ADD/UPDATE/DELETE + HIERARQUIA) =====================
+# ===================== USERS ADMIN =====================
 
 @app.get("/users")
 @login_required
@@ -1011,7 +1087,6 @@ def users_add():
     if hierarquia not in ("user", "gestor", "financeiro", "admin"):
         hierarquia = "user"
 
-    # duplicado
     if _get_user_by_login(login):
         return redirect(url_for("users_admin", error="Login já existe."))
 
@@ -1042,7 +1117,6 @@ def users_update():
     if not login:
         return redirect(url_for("users_admin", error="Login inválido."))
 
-    # não permitir rebaixar/alterar o próprio admin sem querer? (mantém simples)
     payload = {}
 
     if mode == "reset_password":
@@ -1085,7 +1159,6 @@ def users_delete():
     if not login:
         return redirect(url_for("users_admin", error="Login inválido."))
 
-    # bloqueia excluir a si mesmo
     if login == current_user.login:
         return redirect(url_for("users_admin", error="Você não pode excluir o próprio usuário logado."))
 
@@ -1095,7 +1168,6 @@ def users_delete():
         return redirect(url_for("users_admin", error="Falha ao excluir usuário."))
 
     return redirect(url_for("users_admin", ok="Usuário excluído."))
-
 
 # ===================== RUN =====================
 

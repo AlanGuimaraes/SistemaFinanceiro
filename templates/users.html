@@ -134,8 +134,6 @@
     color:#0f172a;
   }
   .pill.admin{ background: rgba(27,42,166,.10); border-color: rgba(27,42,166,.22); color:#111827; }
-  .pill.financeiro{ background: rgba(22,163,74,.10); border-color: rgba(22,163,74,.22); color:#14532d; }
-  .pill.gestor{ background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.25); color:#7c2d12; }
   .pill.user{ background: rgba(100,116,139,.10); border-color: rgba(100,116,139,.22); color:#334155; }
 
   .alert{
@@ -279,8 +277,6 @@
             <td>
                 <select class="cell-select" name="hierarquia">
                   <option value="user" {% if h == 'user' %}selected{% endif %}>user</option>
-                  <option value="gestor" {% if h == 'gestor' %}selected{% endif %}>gestor</option>
-                  <option value="financeiro" {% if h == 'financeiro' %}selected{% endif %}>financeiro</option>
                   <option value="admin" {% if h == 'admin' %}selected{% endif %}>admin</option>
                 </select>
             </td>
@@ -340,8 +336,6 @@
             <label>Hierarquia</label>
             <select class="cell-select" name="hierarquia">
               <option value="user">user</option>
-              <option value="gestor">gestor</option>
-              <option value="financeiro">financeiro</option>
               <option value="admin">admin</option>
             </select>
           </div>
@@ -373,7 +367,7 @@
         </div>
 
         <div class="hint">
-          Dica: use hierarquias <b>user</b>, <b>gestor</b>, <b>financeiro</b>, <b>admin</b>.
+          Dica: use hierarquias <b>user</b>, <b>admin</b>.
         </div>
       </form>
     </div>
